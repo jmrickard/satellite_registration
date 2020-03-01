@@ -1,0 +1,44 @@
+- name: "Set hostname to {{ inventory_hostname }}"
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Install katello certificate from Satellite
+  package:
+    name: "https://{{ satellite_fqdn }}/pub/katello-ca-consumer-latest.noarch.rpm"
+    state: installed
+    validate_certs: false
+  register: katello
+
+- name: Determine if the server registration status is Current
+  shell:
+    subscription-manager status | egrep 'Current|Insufficient'
+  register: status
+  ignore_errors: true
+  when: katello is succeeded #Will only run when katello rpm is installed
+
+- name: "Register {{ inventory_hostname }} to Satellite"
+  redhat_subscription:
+    activationkey: "{{ activationkey | default ('rhel') }}"
+    org_id: "{{ org_id }}"
+    server_hostname: "{{ satellite_fqdn }}"
+    state: present
+    force_register: true
+  when: katello.changed or status.rc != 0
+
+- name: Install katello-agent on machines
+  yum:
+    name: katello-agent
+    state: installed
+
+- name: Start goferd service
+  service:
+    name: goferd
+    state: started
+    enabled: true
+
+- name: Add 5647/tcp to firewalld
+  firewalld:
+    permanent: true
+    port: 5647/tcp
+    state: enabled
+    immediate: true
